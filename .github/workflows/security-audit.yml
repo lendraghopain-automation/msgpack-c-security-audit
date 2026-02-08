@@ -1,0 +1,95 @@
+name: msgpack-c-advanced-dependency-audit
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  scan-dependencies:
+    runs-on: ubuntu-latest
+    outputs:
+      has_high_risk: ${{ steps.check_risk.outputs.has_high }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Scan Dependencies
+        run: python3 scripts/scan_dependencies.py
+        
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-report
+          path: dependency-report.json
+
+      - name: Check Risk Level
+        id: check_risk
+        run: |
+          if grep -q '"risk": "high"' dependency-report.json; then
+            echo "Found high risk dependencies."
+            echo "has_high=true" >> $GITHUB_OUTPUT
+          else
+            echo "No high risk dependencies found."
+            echo "has_high=false" >> $GITHUB_OUTPUT
+          fi
+
+  create-alert-pr:
+    needs: scan-dependencies
+    if: needs.scan-dependencies.outputs.has_high_risk == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download Report
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-report
+          
+      - name: Create Security Alert PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Generating PR description..."
+          
+          echo "## High Risk Dependencies Detected" > pr_body.md
+          echo "" >> pr_body.md
+          echo "The following dependencies have been flagged as **HIGH** risk (GPL viral nature):" >> pr_body.md
+          echo "" >> pr_body.md
+          
+          jq -r '.[] | select(.risk == "high") | "- **" + .name + "** (" + .license + "): GPL 传染性 risk. Suggest removal or replacement."' dependency-report.json >> pr_body.md
+          
+          echo "" >> pr_body.md
+          echo "### Other Risks (Medium)" >> pr_body.md
+          jq -r '.[] | select(.risk == "medium") | "- **" + .name + "** (" + .license + "): Unknown/Medium risk."' dependency-report.json >> pr_body.md
+          
+          BRANCH_NAME="security-alert-$(date +%s)"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git checkout -b $BRANCH_NAME
+          
+          cp dependency-report.json SECURITY_AUDIT_REPORT.json
+          git add SECURITY_AUDIT_REPORT.json
+          git commit -m "Security Audit: High risk dependencies detected"
+          git push origin $BRANCH_NAME
+          
+          PR_URL=$(gh pr create \
+            --title "[SECURITY ALERT] High-risk license detected in dependencies" \
+            --body-file pr_body.md \
+            --base main \
+            --head $BRANCH_NAME)
+            
+          echo "Created PR: $PR_URL"
+          
+          gh pr comment $PR_URL --body "⚠️ **GPL 依赖风险** 警告！\n\n检测到高风险组件，**建议移除或替换**。\n\n*(本消息由 自动扫描 生成)*"
