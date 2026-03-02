@@ -1,0 +1,27 @@
+[
+  {
+    "name": "ZLIB",
+    "license": "Zlib",
+    "risk": "low"
+  },
+  {
+    "name": "Boost",
+    "license": "BSL-1.0",
+    "risk": "low"
+  },
+  {
+    "name": "cJSON",
+    "license": "MIT",
+    "risk": "low"
+  },
+  {
+    "name": "GTest",
+    "license": "BSD-3-Clause",
+    "risk": "low"
+  },
+  {
+    "name": "HighRiskGPL",
+    "license": "GPL-2.0",
+    "risk": "high"
+  }
+]
